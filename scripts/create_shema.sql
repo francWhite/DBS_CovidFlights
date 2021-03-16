@@ -1,4 +1,5 @@
 CREATE SCHEMA covid_flights;
+USE covid_flights;
 
 CREATE TABLE Airport
 (
