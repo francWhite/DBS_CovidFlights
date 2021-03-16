@@ -1,4 +1,4 @@
--- import with plane SQL (also slow...)
+-- import with plane SQL
 
 USE covid_flights;
 
