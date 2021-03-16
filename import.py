@@ -2,9 +2,17 @@ import mysql.connector
 import csv
 from os import walk
 
+airlines_cache = {}
+airports_cache = {}
+states_code_cache = {}
+states_name_cache = {}
+county_cache = {}
+
 def main():
   db = mysql.connector.connect(host="localhost",  user="hslu_user",  password=")dz,K^K=_=qqWd487=JR.T@=V#pg!7!K", database="covid_flights")
   cursor = db.cursor()
+
+  disable_indexing(cursor)
   
   import_lookupTable(cursor, 'Airport', './datasets/lookup-tables/AIRPORT.csv')
   import_lookupTable(cursor, 'Airline', './datasets/lookup-tables/AIRLINE_IATA_CODE.csv')
@@ -13,6 +21,9 @@ def main():
   
   import_flights(cursor, db, './datasets/flightdata')
   import_covidCaseRecords(cursor, db, './datasets/covid/covid-us-counties.csv')
+
+  enable_indexing(cursor)
+  db.commit()
 
 #-----------------------------------import lookup-tables---------------------------------------
 def import_lookupTable(cursor, tablename, filename):
@@ -35,10 +46,6 @@ def import_flights(cursor, db, directory):
 
 def import_flight(cursor, db, filename):
   print('importing: {}'.format(filename))
-  
-  airlines_cache = {}
-  airports_cache = {}
-  states_cache = {}
   values = []
 
   with open(filename) as csv_file:
@@ -59,60 +66,22 @@ def import_flight(cursor, db, filename):
       airTime =  row[12] if row[12] else None
       distance = row[13] if row[13] else None
 
-      airline_id = get_cached_airline_id(cursor, airlines_cache, airline_code)
-      originAirport_id = get_cached_airport_id(cursor, airports_cache, originAirport_code)
-      originState_id = get_cached_state_id_byCode(cursor, states_cache, originState_code)
-      destAirport_id = get_cached_airport_id(cursor, airports_cache, destAirport_code)
-      destState_id = get_cached_state_id_byCode(cursor, states_cache, destState_code)
+      airline_id = get_cached_airline_id(cursor, airline_code)
+      originAirport_id = get_cached_airport_id(cursor, originAirport_code)
+      originState_id = get_cached_state_id_byCode(cursor, originState_code)
+      destAirport_id = get_cached_airport_id(cursor, destAirport_code)
+      destState_id = get_cached_state_id_byCode(cursor, destState_code)
 
       row_values = (date, flightnumber, tailnumber, cancelled, duplicate, distance, airTime, airline_id, originAirport_id, originState_id, destAirport_id, destState_id)
       values.append(row_values)
 
-  value_chunks = chunks(values, 10000)
-  chunk_count = len(list(chunks(values, 10000)))
-  index = 0
-  for chunk in value_chunks:
-    sql = "INSERT INTO Flight(Date, FlightNumber, TailNumber, Cancelled, Duplicate, Distance, AirTime, Airline_Id, OriginAirport_Id, OriginState_Id, DestinationAirport_Id, DestinationState_Id) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)"
-
-    cursor.executemany(sql, chunk)
-    db.commit()
-
-    index += 1
-    print("{:.2f}%".format(index / chunk_count * 100))
-
-def get_cached_airline_id(cursor, airlines_cache, airline_code):
-  if airline_code in airlines_cache:
-    return airlines_cache[airline_code]
-  else:
-    cursor.execute("SELECT Airline_Id FROM airline WHERE Code = %s", (airline_code,))
-    airline_id = cursor.fetchone()[0]
-    airlines_cache[airline_code] = airline_id
-    return airline_id
-
-def get_cached_airport_id(cursor, airports_cache, airport_code):
-  if airport_code in airports_cache:
-    return airports_cache[airport_code]
-  else:
-    cursor.execute("SELECT Airport_Id FROM airport WHERE Code = %s", (airport_code,))
-    airport_id = cursor.fetchone()[0]
-    airports_cache[airport_code] = airport_id
-    return airport_id
-
-def get_cached_state_id_byCode(cursor, states_cache, state_code):
-  if state_code in states_cache:
-    return states_cache[state_code]
-  else:
-    cursor.execute("SELECT State_Id FROM state WHERE Code = %s", (state_code,))
-    state_id = cursor.fetchone()[0]
-    states_cache[state_code] = state_id
-    return state_id
+  sql = "INSERT INTO Flight(Date, FlightNumber, TailNumber, Cancelled, Duplicate, Distance, AirTime, Airline_Id, OriginAirport_Id, OriginState_Id, DestinationAirport_Id, DestinationState_Id) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)"
+  insert_in_chunks(sql, values, cursor, db, 10000)
 
 #--------------------------------------import covid case records------------------------------------------
 def import_covidCaseRecords(cursor, db, filename):
   print('importing: {}'.format(filename))
   values = []
-  states_cache = {}
-  county_cache = {}
 
   with open(filename) as csv_file:
     csv_file.readline()
@@ -125,33 +94,63 @@ def import_covidCaseRecords(cursor, db, filename):
       cases = row[4] if row[4] else 0
       deaths = row[5] if row[5] else 0
       
-      state_id = get_cached_state_id_byName(cursor, states_cache, state_name)
-      county_id = get_cached_county_id(cursor, county_cache, county_name)
+      state_id = get_cached_state_id_byName(cursor, state_name)
+      county_id = get_cached_county_id(cursor, county_name)
 
       row_values = (date, cases, deaths, state_id, county_id)
       values.append(row_values)
 
-  value_chunks = chunks(values, 10000)
-  chunk_count = len(list(chunks(values, 10000)))
-  index = 0
-  for chunk in value_chunks:
-    sql = "INSERT INTO covidcaserecord(Date, Cases, Deaths, State_Id, County_Id) VALUES (%s, %s, %s, %s, %s)"
-    cursor.executemany(sql, chunk)
-    db.commit()
+  sql = "INSERT INTO covidcaserecord(Date, Cases, Deaths, State_Id, County_Id) VALUES (%s, %s, %s, %s, %s)"
+  insert_in_chunks(sql, values, cursor, db, 10000)
 
-    index += 1
-    print("{:.2f}%".format(index / chunk_count * 100))
+#--------------------------------------helper methods#----------------------------------------
+def disable_indexing(cursor):
+  cursor.execute('SET AUTOCOMMIT = 0')
+  cursor.execute('SET FOREIGN_KEY_CHECKS = 0')
+  cursor.execute('SET UNIQUE_CHECKS = 0')
 
-def get_cached_state_id_byName(cursor, states_cache, state_name):
-  if state_name in states_cache:
-    return states_cache[state_name]
+def enable_indexing(cursor):
+  cursor.execute('SET AUTOCOMMIT = 1')
+  cursor.execute('SET FOREIGN_KEY_CHECKS = 1')
+  cursor.execute('SET UNIQUE_CHECKS = 1')
+
+def get_cached_airline_id(cursor, airline_code):
+  if airline_code in airlines_cache:
+    return airlines_cache[airline_code]
+  else:
+    cursor.execute("SELECT Airline_Id FROM airline WHERE Code = %s", (airline_code,))
+    airline_id = cursor.fetchone()[0]
+    airlines_cache[airline_code] = airline_id
+    return airline_id
+
+def get_cached_airport_id(cursor, airport_code):
+  if airport_code in airports_cache:
+    return airports_cache[airport_code]
+  else:
+    cursor.execute("SELECT Airport_Id FROM airport WHERE Code = %s", (airport_code,))
+    airport_id = cursor.fetchone()[0]
+    airports_cache[airport_code] = airport_id
+    return airport_id
+
+def get_cached_state_id_byCode(cursor, state_code):
+  if state_code in states_code_cache:
+    return states_code_cache[state_code]
+  else:
+    cursor.execute("SELECT State_Id FROM state WHERE Code = %s", (state_code,))
+    state_id = cursor.fetchone()[0]
+    states_code_cache[state_code] = state_id
+    return state_id
+
+def get_cached_state_id_byName(cursor, state_name):
+  if state_name in states_name_cache:
+    return states_name_cache[state_name]
   else:
     cursor.execute("SELECT State_Id FROM state WHERE Name = %s", (state_name,))
     state_id = cursor.fetchone()[0]
-    states_cache[state_name] = state_id
+    states_name_cache[state_name] = state_id
     return state_id
 
-def get_cached_county_id(cursor, county_cache, county_name):
+def get_cached_county_id(cursor, county_name):
   if county_name in county_cache:
     return county_cache[county_name]
   else:
@@ -166,15 +165,16 @@ def get_cached_county_id(cursor, county_cache, county_name):
     county_cache[county_name] = county_id
     return county_id
 
-#--------------------------------------helper methods#----------------------------------------
+def insert_in_chunks(sql, values, cursor, db, batchsize):
+  value_chunks = chunks(values, batchsize)
+  chunk_count = len(list(chunks(values, batchsize)))
+  index = 0
+  for chunk in value_chunks:
+    cursor.executemany(sql, chunk)
+    db.commit()
 
-  if state_code in states_cache:
-    return states_cache[state_code]
-  else:
-    cursor.execute("SELECT State_Id FROM state WHERE Code = %s", (state_code,))
-    state_id = cursor.fetchone()[0]
-    states_cache[state_code] = state_id
-    return state_id
+    index += 1
+    print("{:.2f}%".format(index / chunk_count * 100))
 
 def file_len(filename):
     with open(filename) as f:
