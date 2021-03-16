@@ -1,6 +1,7 @@
 import mysql.connector
 import csv
 from os import walk
+from datetime import datetime
 
 airlines_cache = {}
 airports_cache = {}
@@ -9,10 +10,12 @@ states_name_cache = {}
 county_cache = {}
 
 def main():
+  print('starting import - {}'.format(datetime.now().strftime("%H:%M:%S")))
+
   db = mysql.connector.connect(host="localhost",  user="hslu_user",  password=")dz,K^K=_=qqWd487=JR.T@=V#pg!7!K", database="covid_flights")
   cursor = db.cursor()
-
   disable_indexing(cursor)
+  db.commit()
   
   import_lookupTable(cursor, 'Airport', './datasets/lookup-tables/AIRPORT.csv')
   import_lookupTable(cursor, 'Airline', './datasets/lookup-tables/AIRLINE_IATA_CODE.csv')
@@ -24,6 +27,8 @@ def main():
 
   enable_indexing(cursor)
   db.commit()
+
+  print('finished import - {}'.format(datetime.now().strftime("%H:%M:%S")))
 
 #-----------------------------------import lookup-tables---------------------------------------
 def import_lookupTable(cursor, tablename, filename):
