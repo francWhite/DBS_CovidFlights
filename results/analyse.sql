@@ -68,3 +68,33 @@ FROM flights_per_state f
          JOIN state s ON f.State_Id = s.State_Id
          LEFT OUTER JOIN cases_per_state c ON f.State_Id = c.State_Id AND f.Date = c.Date
 ORDER BY f.Date, f.State_Id;
+
+
+
+#------------------------------------ Random facts ------------------------------------
+# most popular airline
+SELECT a.Name, COUNT(f.Airline_Id) number_of_flights
+FROM flight f
+         JOIN airline a ON a.Airline_Id = f.Airline_Id
+GROUP BY f.Airline_Id
+ORDER BY 2 DESC;
+
+# airport with most traffic
+SELECT a.Code, a.Name, COUNT(f.OriginAirport_Id) number_of_flights_departing
+FROM flight f
+         JOIN airport a ON f.OriginAirport_Id = a.Airport_Id
+GROUP BY f.OriginAirport_Id
+ORDER BY 3 DESC;
+
+#average airtime
+SELECT AVG(AirTime) average_airtime
+FROM flight;
+
+# flights per day
+SELECT date, COUNT(*) flights_per_day
+FROM flight
+GROUP BY Date
+ORDER BY 2 DESC;
+
+#total miles
+select sum(Distance) total_miles from flight;
